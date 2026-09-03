@@ -25,6 +25,14 @@ tModLoader/
 └── serverconfig.txt       # optional
 ```
 
+## Autosaving
+
+The container submits the server's `save` console command every five minutes. This periodic save supplements the save performed during an orderly server shutdown.
+
+Set `TML_AUTOSAVE_INTERVAL_SECONDS` to change the interval. The value must be a canonical positive decimal integer from `1` through `2147483647`; it defaults to `300` when omitted.
+
+Interactive console commands remain available when the container is started with an attached standard input, as demonstrated by `stdin_open` and `tty` in `compose.yaml`.
+
 ## Backups
 
 Stop the server before taking a filesystem-level backup so world files are consistent.

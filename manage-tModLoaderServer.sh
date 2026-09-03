@@ -20,6 +20,24 @@ function machine_has {
 	return $?
 }
 
+function validate_autosave_interval {
+	local LC_ALL=C
+	local value="${TML_AUTOSAVE_INTERVAL_SECONDS-300}"
+
+	if [[ ! $value =~ ^[1-9][0-9]*$ ]]; then
+		echo "TML_AUTOSAVE_INTERVAL_SECONDS must be a canonical positive decimal integer" >&2
+		exit 1
+	fi
+
+	if [[ ${#value} -gt 10 ]] ||
+		{ [[ ${#value} -eq 10 ]] && [[ $value > 2147483647 ]]; }; then
+		echo "TML_AUTOSAVE_INTERVAL_SECONDS must not exceed 2147483647" >&2
+		exit 1
+	fi
+
+	autosave_interval_seconds="$value"
+}
+
 # There is seemingly no official documentation on this file but other "official" software does this same check.
 # See: https://github.com/moby/moby/blob/v27.4.0/libnetwork/drivers/bridge/setup_bridgenetfiltering.go#L92-L95
 function is_in_docker {
@@ -426,8 +444,9 @@ Usage: script.sh COMMAND [OPTIONS]
 
 ENV Variables:
  STEAMCMDPATH        Custom path for the steamcmd binary if your package manager does not have it
- TMLVERSION          tModLoader version to download. By default this is the latest release
- TML_WORKSHOP_IDS    Comma-separated Workshop IDs to download and enable. Include every dependency
+ TMLVERSION                       tModLoader version to download. By default this is the latest release
+ TML_WORKSHOP_IDS                 Comma-separated Workshop IDs to download and enable. Include every dependency
+ TML_AUTOSAVE_INTERVAL_SECONDS    Positive autosave interval in seconds. Defaults to 300
 
 Options:
  -h|--help           Show command line help
@@ -519,6 +538,10 @@ while [[ $# -gt 0 ]]; do
 	shift
 done
 
+if [[ $cmd == start ]]; then
+	validate_autosave_interval
+fi
+
 if ! machine_has "curl"; then
 	echo "curl must be installed for the management script to work"
 	exit 1
@@ -579,13 +602,67 @@ start)
 		exit 1
 	fi
 
+	server_io_dir=$(mktemp -d "${TMPDIR:-/tmp}/tmd-server-io.XXXXXX") || exit 1
+	server_input_fifo="$server_io_dir/input"
+
+	if ! mkfifo "$server_input_fifo"; then
+		rm -rf -- "$server_io_dir"
+		exit 1
+	fi
+
+	# A read/write descriptor keeps the FIFO open while the console relay and
+	# autosave scheduler independently submit complete server commands.
+	if ! exec 9<>"$server_input_fifo"; then
+		rm -rf -- "$server_io_dir"
+		exit 1
+	fi
+
+	console_relay_pid=
+	autosave_timer_pid=
+
+	cleanup_server_io() {
+		local helper_pid
+
+		for helper_pid in "$console_relay_pid" "$autosave_timer_pid"; do
+			if [[ -n $helper_pid ]] && kill -0 "$helper_pid" 2>/dev/null; then
+				kill "$helper_pid" 2>/dev/null || :
+			fi
+		done
+
+		for helper_pid in "$console_relay_pid" "$autosave_timer_pid"; do
+			if [[ -n $helper_pid ]]; then
+				wait "$helper_pid" 2>/dev/null || :
+			fi
+		done
+
+		exec 9>&-
+		rm -rf -- "$server_io_dir"
+	}
+
+	trap cleanup_server_io EXIT
+
 	setsid ./LaunchUtils/ScriptCaller.sh \
 		-server \
 		-config "$folder/serverconfig.txt" \
 		-steamworkshopfolder "$folder/steamapps/workshop" \
 		-tmlsavedirectory "$folder" \
-		"${start_args[@]}" &
+		"${start_args[@]}" \
+		<"$server_input_fifo" &
 	server_pid=$!
+
+	forward_console_input() {
+		local input_line
+
+		while IFS= read -r input_line || [[ -n $input_line ]]; do
+			printf '%s\n' "$input_line" >&9 || return 1
+		done
+	}
+
+	forward_console_input <&0 &
+	console_relay_pid=$!
+
+	sleep "$autosave_interval_seconds" &
+	autosave_timer_pid=$!
 
 	forward_server_signal() {
 		kill -s "$1" -- "-$server_pid" 2>/dev/null || :
@@ -596,16 +673,57 @@ start)
 	trap 'forward_server_signal HUP' HUP
 
 	server_status=0
-	while true; do
-		wait "$server_pid"
-		server_status=$?
+	supervisor_failure=
 
-		if ! kill -0 "$server_pid" 2>/dev/null; then
+	while true; do
+		completed_pid=
+		wait -n -p completed_pid "$server_pid" "$autosave_timer_pid"
+		completed_status=$?
+
+		# A trapped container signal interrupts wait without completing either
+		# child. The signal handler forwards it to the complete server group.
+		if [[ -z $completed_pid ]]; then
+			continue
+		fi
+
+		if [[ $completed_pid == "$server_pid" ]]; then
+			server_status=$completed_status
 			break
 		fi
+
+		if [[ $completed_pid != "$autosave_timer_pid" ]]; then
+			supervisor_failure="wait returned an unexpected child process"
+			break
+		fi
+
+		if [[ $completed_status -ne 0 ]]; then
+			supervisor_failure="the autosave timer failed"
+			break
+		fi
+
+		if ! printf 'save\n' >&9; then
+			supervisor_failure="the autosave command could not be submitted"
+			break
+		fi
+
+		sleep "$autosave_interval_seconds" &
+		autosave_timer_pid=$!
 	done
 
+	if [[ -n $supervisor_failure ]]; then
+		echo "Server supervisor failure: $supervisor_failure" >&2
+		forward_server_signal TERM
+
+		while kill -0 "$server_pid" 2>/dev/null; do
+			wait "$server_pid" 2>/dev/null || :
+		done
+
+		server_status=1
+	fi
+
 	trap - TERM INT HUP
+	cleanup_server_io
+	trap - EXIT
 	exit "$server_status"
 	;;
 *)
