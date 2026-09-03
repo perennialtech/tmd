@@ -1,28 +1,29 @@
-FROM ubuntu:22.04 AS builder
+# tModLoader ships Linux native components built for glibc. Keep the complete
+# runtime on a glibc distribution rather than combining musl with selected
+# compatibility libraries.
+FROM ubuntu:22.04
 
-# SteamCMD is a 32-bit x86 executable and requires glibc.
 ARG DEBIAN_FRONTEND=noninteractive
 RUN dpkg --add-architecture i386 \
-    && apt-get update -y \
-    && apt-get install -y --no-install-recommends libc6:i386 \
-    && rm -rf /var/lib/apt/lists/*
-
-FROM alpine:3.20
-
-RUN apk add --no-cache \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
         bash \
+        ca-certificates \
         curl \
         file \
-        icu-libs \
-        libgcc \
-        libstdc++ \
-        su-exec \
+        findutils \
+        libc6:i386 \
+        libgcc-s1 \
+        libgcc-s1:i386 \
+        libicu70 \
+        libssl3 \
+        libstdc++6 \
+        libstdc++6:i386 \
+        passwd \
         unzip \
-        util-linux
-
-# Copy the complete i386 glibc directory so that library symlinks and their
-# versioned targets remain consistent.
-COPY --from=builder /lib/i386-linux-gnu/ /lib/
+        util-linux \
+        zlib1g \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV HOME=/home/tml \
     USER=tml \
@@ -34,8 +35,14 @@ ENV HOME=/home/tml \
 
 # The image uses a fixed build identity. The entrypoint replaces these IDs with
 # the configured Linux host IDs before accessing bind-mounted data.
-RUN addgroup -g 1000 tml \
-    && adduser -D --home /home/tml -u 1000 -G tml tml
+RUN groupadd --gid 1000 tml \
+    && useradd \
+        --create-home \
+        --home-dir /home/tml \
+        --shell /bin/bash \
+        --uid 1000 \
+        --gid tml \
+        tml
 
 WORKDIR /home/tml
 
@@ -67,7 +74,8 @@ RUN test -n "$TML_VERSION" \
     && ISDOCKER=1 TMLVERSION="$TML_VERSION" \
         ./manage-tModLoaderServer.sh install-tml --github \
     && test -f /home/tml/server/LaunchUtils/ScriptCaller.sh \
-    && chmod 0755 /home/tml/server/LaunchUtils/ScriptCaller.sh
+    && chmod 0755 /home/tml/server/LaunchUtils/ScriptCaller.sh \
+    && /home/tml/server/dotnet/dotnet --info >/dev/null
 
 LABEL io.github.perennialtech.tmd.tmodloader-version="$TML_VERSION"
 

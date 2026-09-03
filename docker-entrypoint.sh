@@ -107,7 +107,10 @@ chown -R "$TML_UID:$TML_GID" /tModLoader
 
 umask "$UMASK"
 
-exec su-exec tml:tml \
+exec setpriv \
+	--reuid="$TML_UID" \
+	--regid="$TML_GID" \
+	--init-groups \
 	/home/tml/manage-tModLoaderServer.sh \
 	start \
 	--folder /tModLoader \
