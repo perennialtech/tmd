@@ -4,7 +4,7 @@
 #shellcheck disable=2155
 
 # Only update the major version when a breaking change is introduced
-script_version="4.0.0.1"
+script_version="5.0.0.0"
 script_url="https://raw.githubusercontent.com/perennialtech/tmd/master/manage-tModLoaderServer.sh"
 
 # Shut up both commands
@@ -102,9 +102,6 @@ function get_version {
 		echo "$TMLVERSION"
 	elif [[ -v tml_version ]]; then
 		echo "$tml_version"
-	elif [[ -r "$folder/Mods/tmlversion.txt" ]]; then
-		# Format the tmlversion file appropriately, as it is missing padded 0's on months/days
-		echo "v$(cat "$folder/Mods/tmlversion.txt" | sed -E 's/\.([0-9])\./\.0\1\./g')"
 	else
 		# Get the latest release if no other options are provided
 		local release_url="https://api.github.com/repos/tModLoader/tModLoader/releases/latest"
@@ -216,36 +213,142 @@ function install_tml {
 	fi
 }
 
-function install_workshop_mods {
-	verify_steamcmd
+function configure_workshop_mods {
+	local LC_ALL=C
+	local workshop_ids="${TML_WORKSHOP_IDS-}"
+	local mods_dir="$folder/Mods"
+	local workshop_root="$folder/steamapps/workshop/content/1281930"
+	local legacy_path
+	local unsupported_mod
 
-	if ! [[ -d "Mods" ]]; then
-		echo "Mods folder does not exist, please run install-tml command or create a 'Mods' folder before installing mods"
-		exit
+	mkdir -p "$mods_dir" || exit 1
+
+	# These files represent unsupported mod installation paths and must not be
+	# silently combined with the generated Workshop configuration.
+	for legacy_path in \
+		"$folder/install.txt" \
+		"$folder/tmlversion.txt" \
+		"$mods_dir/install.txt" \
+		"$mods_dir/tmlversion.txt"; do
+		if [[ -e $legacy_path ]]; then
+			echo "Unsupported mod configuration file found: $legacy_path" >&2
+			echo "Configure every desired mod through TML_WORKSHOP_IDS and remove this file." >&2
+			exit 1
+		fi
+	done
+
+	unsupported_mod=$(find "$mods_dir" -type f -name '*.tmod' -print -quit) || exit 1
+	if [[ -n $unsupported_mod ]]; then
+		echo "Unsupported local mod file found: $unsupported_mod" >&2
+		echo "Configure every desired mod through TML_WORKSHOP_IDS and remove local .tmod files." >&2
+		exit 1
 	fi
 
-	pushd Mods
-
-	if ! [[ -r install.txt ]]; then
-		echo "No workshop mods to install"
-		popd
-		return
+	if [[ -n $workshop_ids && ! $workshop_ids =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]]; then
+		echo "TML_WORKSHOP_IDS must be empty or a comma-separated list of canonical positive decimal Workshop IDs without whitespace" >&2
+		exit 1
 	fi
 
-	echo "Installing workshop mods"
+	local -a workshop_id_list=()
+	local -a steamcmd_args=(+force_install_dir "$folder" +login anonymous)
+	local -a enabled_names=()
+	local -A seen_ids=()
+	local -A seen_names=()
+	local workshop_id
+	local internal_name
+	local item_dir
 
-	local steamcmd_command
-	local lines=0
-	while read -r line; do
-		lines=$((lines + 1))
-		steamcmd_command="$steamcmd_command +workshop_download_item 1281930 $line"
-	done <install.txt
+	if [[ -n $workshop_ids ]]; then
+		IFS=',' read -r -a workshop_id_list <<<"$workshop_ids"
+	fi
 
-	eval "'$steam_cmd' +force_install_dir '$folder' +login anonymous$steamcmd_command +quit"
+	for workshop_id in "${workshop_id_list[@]}"; do
+		if [[ ${#workshop_id} -gt 20 ]] ||
+			[[ ${#workshop_id} -eq 20 && $workshop_id > 18446744073709551615 ]]; then
+			echo "Workshop ID exceeds the unsigned 64-bit Steam ID range: $workshop_id" >&2
+			exit 1
+		fi
 
-	echo -e "\nInstalled $lines mods"
+		if [[ -v 'seen_ids[$workshop_id]' ]]; then
+			echo "Duplicate Workshop ID in TML_WORKSHOP_IDS: $workshop_id" >&2
+			exit 1
+		fi
+		seen_ids["$workshop_id"]=1
+		steamcmd_args+=(+workshop_download_item 1281930 "$workshop_id")
+	done
 
-	popd
+	if [[ ${#workshop_id_list[@]} -gt 0 ]]; then
+		verify_steamcmd
+		steamcmd_args+=(+quit)
+
+		echo "Downloading ${#workshop_id_list[@]} Workshop mod(s)"
+		if ! "$steam_cmd" "${steamcmd_args[@]}"; then
+			echo "SteamCMD failed to download the configured Workshop mods" >&2
+			exit 1
+		fi
+	fi
+
+	for workshop_id in "${workshop_id_list[@]}"; do
+		item_dir="$workshop_root/$workshop_id"
+		if [[ ! -d $item_dir ]]; then
+			echo "Workshop item $workshop_id was not downloaded under $workshop_root" >&2
+			exit 1
+		fi
+
+		local -a discovered_names=()
+		mapfile -t discovered_names < <(
+			find "$item_dir" -type f -name '*.tmod' -exec basename '{}' .tmod ';' |
+				sort -u
+		)
+
+		if [[ ${#discovered_names[@]} -ne 1 ]]; then
+			echo "Workshop item $workshop_id must contain exactly one unique .tmod name; found ${#discovered_names[@]}" >&2
+			exit 1
+		fi
+
+		internal_name="${discovered_names[0]}"
+		if [[ ! $internal_name =~ ^[A-Za-z][A-Za-z0-9_]*$ ]]; then
+			echo "Workshop item $workshop_id has an invalid internal mod name: $internal_name" >&2
+			exit 1
+		fi
+
+		if [[ -v 'seen_names[$internal_name]' ]]; then
+			echo "Multiple Workshop IDs resolve to the internal mod name $internal_name" >&2
+			exit 1
+		fi
+		seen_names["$internal_name"]=1
+		enabled_names+=("$internal_name")
+	done
+
+	local enabled_tmp
+	local index
+	enabled_tmp=$(mktemp "$mods_dir/.enabled.json.XXXXXX") || exit 1
+
+	if ! {
+		printf '[\n'
+		for ((index = 0; index < ${#enabled_names[@]}; index++)); do
+			if [[ $index -gt 0 ]]; then
+				printf ',\n'
+			fi
+			printf '  "%s"' "${enabled_names[$index]}"
+		done
+		if [[ ${#enabled_names[@]} -gt 0 ]]; then
+			printf '\n'
+		fi
+		printf ']\n'
+	} >"$enabled_tmp"; then
+		rm -f "$enabled_tmp"
+		echo "Could not write generated mod configuration" >&2
+		exit 1
+	fi
+
+	if ! mv "$enabled_tmp" "$mods_dir/enabled.json"; then
+		rm -f "$enabled_tmp"
+		echo "Could not install generated mod configuration" >&2
+		exit 1
+	fi
+
+	echo "Configured ${#enabled_names[@]} Workshop mod(s)"
 }
 
 function print_help {
@@ -256,24 +359,23 @@ Usage: script.sh COMMAND [OPTIONS]
 
 ENV Variables:
  STEAMCMDPATH        Custom path for the steamcmd binary if your package manager does not have it
- TMLVERSION          TML version to download. By default this is the latest release
+ TMLVERSION          tModLoader version to download. By default this is the latest release
+ TML_WORKSHOP_IDS    Comma-separated Workshop IDs to download and enable. Include every dependency
 
 Options:
  -h|--help           Show command line help
  -v|--version        Display the current version of the management script
  -g|--github         Download tML from Github instead of using steamcmd
  -f|--folder         The folder containing all of your server data (Mods, Worlds, serverconfig.txt, etc..)
- -u|--username       The steam username to login use when downloading tML. Not required to download mods
+ -u|--username       The steam username to use when downloading tML
  --keepbackups       When installing with --github, keep all previous versions instead of deleting them when updating
  --tmlversion        Version of tModLoader to install. Only works if --github is provided. Functionally equivalent to the TMLVERSION env variable
- --steamcmdpath      Path to steamcmd.sh for Steam tModLoader mod installation. Functionally equivalent to the STEAMCMDPATH env variable
+ --steamcmdpath      Path to steamcmd.sh for Steam tModLoader downloads. Functionally equivalent to the STEAMCMDPATH env variable
  --tml-version       DEPRECATED: Kept for compatibility, but the --tmlversion flag or the TMLVERSION environment variable should be used instead
 
 Commands:
  install-tml         Installs tModLoader from Steam (or Github if --github is provided)
- install-mods        Installs any mods from install.txt, if present. Requires steamcmd
- install             Alias for install-tml install-mods
- start [args]        Launches the server and passes through any extra args
+ start [args]        Configures Workshop mods, then launches the server with any extra args
 "
 	exit
 }
@@ -348,17 +450,10 @@ mkdir -p "$folder" && pushd "$_"
 
 case $cmd in
 update-script)
-	# NOOP because the script automatically checks for an update before thiss
-	;;
-install-mods)
-	install_workshop_mods
+	# NOOP because the script automatically checks for an update
 	;;
 install-tml)
 	install_tml
-	;;
-install)
-	install_tml
-	install_workshop_mods
 	;;
 start)
 	# Edge-case for ScriptCaller.sh where dotnet exists but TML logs don't yet
@@ -366,16 +461,17 @@ start)
 
 	if is_in_docker; then
 		mkdir -p "$folder/Mods" "$folder/Worlds"
-		install_workshop_mods
 
 		cat "dotnet installed via management script... pending first server start..." >>"$HOME/server/tModLoader-Logs/server.log"
 		cd "$HOME/server" || exit
 	elif ! [[ -f "$folder/server/LaunchUtils/ScriptCaller.sh" ]]; then
-		echo "A tModLoader server is not installed yet, please run the install or install-tml command before starting a server"
+		echo "A tModLoader server is not installed yet, please run the install-tml command before starting a server"
 		exit 1
 	else
 		cd "$folder/server" || exit
 	fi
+
+	configure_workshop_mods
 
 	# NOTE: Technically BASH_SOURCE is >= Bash 3.0, but this version is over 20 years old so the chance of any issues is minimal
 	sed -i 's|cd "$(dirname "$0")"|cd "$(dirname "${BASH_SOURCE[0]}")"|' ./LaunchUtils/ScriptCaller.sh
@@ -384,7 +480,7 @@ start)
 	source ./LaunchUtils/ScriptCaller.sh -server -config "$folder/serverconfig.txt" -steamworkshopfolder "$folder/steamapps/workshop" -tmlsavedirectory "$folder" $start_args
 	;;
 *)
-	echo "Invalid Command: $1"
+	echo "Invalid Command: $cmd"
 	print_help
 	;;
 esac

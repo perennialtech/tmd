@@ -17,6 +17,13 @@ services:
       TML_UID: "1000"
       TML_GID: "1000"
 
+      # Comma-separated Steam Workshop IDs without whitespace. The container
+      # downloads and enables exactly these items on every startup. SteamCMD
+      # does not resolve dependencies, so include every dependency explicitly.
+      #
+      # Example: "2563309347,2619954303"
+      TML_WORKSHOP_IDS: ""
+
       # Use three or four octal digits. Keep this value quoted so YAML preserves
       # its leading zeroes.
       UMASK: "0002"
@@ -109,14 +116,10 @@ services:
       # networking, remove -nosteam and enable the -steam options below.
       - -nosteam
 
-      # Directory containing manually installed .tmod files. Workshop content
-      # downloaded by tModLoader remains under /tModLoader/steamapps.
+      # Directory containing the generated enabled.json file. The container
+      # rejects .tmod files placed in this directory.
       - -modpath
       - /tModLoader/Mods
-
-      # Optional: load only the mods belonging to a named mod pack.
-      # - -modpack
-      # - MyModpack
 
       # Optional: enable Steam networking. Remove -nosteam before enabling.
       # - -steam
@@ -141,7 +144,6 @@ services:
       # - "-1"
 
     volumes:
-      # This directory contains worlds, saves, serverconfig.txt, local mods,
-      # enabled.json, install.txt, logs, ban lists, and downloaded Workshop
-      # content.
+      # This directory contains worlds, saves, serverconfig.txt, the generated
+      # enabled.json file, logs, ban lists, and downloaded Workshop content.
       - ./tModLoader:/tModLoader

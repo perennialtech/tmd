@@ -35,6 +35,7 @@ ENV HOME=/home/tml \
     PATH="${PATH}:/home/tml/.bin" \
     TML_UID=1000 \
     TML_GID=1000 \
+    TML_WORKSHOP_IDS="" \
     UMASK=0002
 
 # The image uses a fixed build identity. The entrypoint replaces these IDs with
