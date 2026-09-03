@@ -3,9 +3,7 @@
 #shellcheck disable=2164
 #shellcheck disable=2155
 
-# Only update the major version when a breaking change is introduced
 script_version="5.0.0.0"
-script_url="https://raw.githubusercontent.com/perennialtech/tmd/master/manage-tModLoaderServer.sh"
 
 # Shut up both commands
 function pushd {
@@ -29,44 +27,6 @@ function is_in_docker {
 		return 0
 	fi
 	return 1
-}
-
-function update_script {
-	latest_script_version=$(curl -s "$script_url" 2>/dev/null | grep "script_version=" | head -n1 | cut -d '"' -f2)
-
-	local new_version=$(echo -e "$script_version\n$latest_script_version" | sort -rV | head -n1)
-	if [[ $script_version == "$new_version" ]]; then
-		echo "No script update found"
-		return
-	fi
-
-	if is_in_docker; then
-		echo "The management script has been updated, please rebuild your Docker container to get the updated script!"
-		return
-	fi
-
-	if [[ ${script_version:0:1} != "${new_version:0:1}" ]]; then
-		read -t 20 -p "A major version change has been detected (v$script_version -> v$new_version) Major versions mean incompatibilities with previous versions, so you should check the wiki for any updates to how the script works. Update anyways? (y/n): " update_major
-		if [[ $update_major != [Yy]* ]]; then
-			echo "Skipping major version update"
-			return
-		fi
-	else
-		read -t 10 -p "An update for the management script is available (v$script_version -> v$new_version). Update now? (y/n): " update_minor
-		if [[ $update_minor != [Yy]* ]]; then
-			echo "Skipping version update"
-			return
-		fi
-	fi
-
-	# Go to where the script currently is
-	pushd "$(dirname "$(realpath "$0")")"
-
-	echo "Updating from version v$script_version to v$latest_script_version"
-	curl -s -O "$script_url" || exit 1
-	mv manage-tModLoaderServer.sh.1 manage-tModLoaderServer.sh
-
-	popd
 }
 
 # Check PATH and flags for required commands for tml/mod installation
@@ -106,7 +66,7 @@ function get_version {
 		# Get the latest release if no other options are provided
 		local release_url="https://api.github.com/repos/tModLoader/tModLoader/releases/latest"
 		local latest_release
-		latest_release=$(curl -s "$release_url" 2>/dev/null | grep '"tag_name":' | sort | tail -1 | sed -E 's/.*"([^"]+)".*/\1/') # Get latest release from github's api
+		latest_release=$(curl -s "$release_url" 2>/dev/null | grep '"tag_name":' | sort | tail -1 | sed -E 's/.*"([^"]+)".*/\1/')
 		echo "$latest_release"
 	fi
 }
@@ -115,7 +75,7 @@ function install_tml_github {
 	echo "Installing TML from Github"
 	local ver="$(get_version)"
 
-	# Allow nullglob so taht if "v*.tar.gz" matches no entries it doesnt try to remove the literal name
+	# Allow nullglob so that if "v*.tar.gz" matches no entries it doesn't try to remove the literal name
 	shopt -s nullglob
 
 	# If .ver exists we're doing an update instead, compare versions to see if it's already installed and backup if it isn't
@@ -384,7 +344,7 @@ github=false
 keep_backups=false
 start_args=""
 
-if [ $# -eq 0 ]; then # Check for commands
+if [ $# -eq 0 ]; then
 	echo "No command supplied"
 	print_help
 fi
@@ -439,8 +399,6 @@ if ! machine_has "curl"; then
 	exit 1
 fi
 
-update_script
-
 if ! [[ -v folder ]]; then
 	echo "Setting folder to current directory"
 	folder="$(dirname "$(realpath "$0")")"
@@ -449,9 +407,6 @@ fi
 mkdir -p "$folder" && pushd "$_"
 
 case $cmd in
-update-script)
-	# NOOP because the script automatically checks for an update
-	;;
 install-tml)
 	install_tml
 	;;
