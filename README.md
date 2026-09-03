@@ -34,7 +34,7 @@ If you are using **tModLoader 1.4.3 or earlier**, the Steamworks.NET library did
 Both the Docker and Management script **require** the same folder structure, so make sure it's setup properly before installing. Here is what is should look like:
 
 ```
-docker-compose.yml (Docker version only)
+compose.yaml (Docker version only)
 Dockerfile (Docker version only)
 tModLoader
 ├── Mods
