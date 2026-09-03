@@ -16,19 +16,13 @@ RUN apk add --no-cache \
         icu-libs \
         libgcc \
         libstdc++ \
-        nano \
-        su-exec
+        su-exec \
+        unzip \
+        util-linux
 
-# Alpine's compatibility libraries cannot run SteamCMD reliably, so provide its
-# required 32-bit glibc libraries directly.
-COPY --from=builder \
-    /lib/i386-linux-gnu/ld-linux.so.2 \
-    /lib/i386-linux-gnu/libc.so.6 \
-    /lib/i386-linux-gnu/libdl.so.2 \
-    /lib/i386-linux-gnu/libm.so.6 \
-    /lib/i386-linux-gnu/libpthread.so.0 \
-    /lib/i386-linux-gnu/librt.so.1 \
-    /lib/
+# Copy the complete i386 glibc directory so that library symlinks and their
+# versioned targets remain consistent.
+COPY --from=builder /lib/i386-linux-gnu/ /lib/
 
 ENV HOME=/home/tml \
     USER=tml \
@@ -50,8 +44,11 @@ RUN mkdir -p /home/tml/Steam /home/tml/.bin \
 
 USER tml
 
-RUN curl -fsSL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" \
-    | tar xzf - -C /home/tml/Steam
+RUN curl -fL \
+        -o /tmp/steamcmd-linux.tar.gz \
+        "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" \
+    && tar -xzf /tmp/steamcmd-linux.tar.gz -C /home/tml/Steam \
+    && rm -f /tmp/steamcmd-linux.tar.gz
 
 COPY --chown=tml:tml --chmod=0755 <<EOF /home/tml/.bin/steamcmd
 #!/bin/bash
@@ -63,9 +60,16 @@ RUN steamcmd +quit
 
 COPY --chown=tml:tml --chmod=0755 manage-tModLoaderServer.sh /home/tml/manage-tModLoaderServer.sh
 
-# Install the server into the image. Persistent worlds, mods, configuration,
-# workshop content, and saves are kept separately under /tModLoader.
-RUN ISDOCKER=1 ./manage-tModLoaderServer.sh install-tml --github
+# The exact release is resolved outside the Docker build so a changed upstream
+# version changes this layer's cache key.
+ARG TML_VERSION
+RUN test -n "$TML_VERSION" \
+    && ISDOCKER=1 TMLVERSION="$TML_VERSION" \
+        ./manage-tModLoaderServer.sh install-tml --github \
+    && test -f /home/tml/server/LaunchUtils/ScriptCaller.sh \
+    && chmod 0755 /home/tml/server/LaunchUtils/ScriptCaller.sh
+
+LABEL io.github.perennialtech.tmd.tmodloader-version="$TML_VERSION"
 
 USER root
 

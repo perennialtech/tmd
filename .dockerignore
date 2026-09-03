@@ -1,0 +1,7 @@
+.git
+.github
+tModLoader
+serverconfig.txt
+*.wld
+*.wld.bak
+*.log

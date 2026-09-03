@@ -59,117 +59,209 @@ function verify_steamcmd {
 
 function get_version {
 	if [[ -v TMLVERSION ]]; then
-		echo "$TMLVERSION"
+		printf '%s\n' "$TMLVERSION"
 	elif [[ -v tml_version ]]; then
-		echo "$tml_version"
+		printf '%s\n' "$tml_version"
 	else
-		# Get the latest release if no other options are provided
-		local release_url="https://api.github.com/repos/tModLoader/tModLoader/releases/latest"
+		local latest_url
 		local latest_release
-		latest_release=$(curl -s "$release_url" 2>/dev/null | grep '"tag_name":' | sort | tail -1 | sed -E 's/.*"([^"]+)".*/\1/')
-		echo "$latest_release"
+
+		if ! latest_url=$(curl -fsSL \
+			-o /dev/null \
+			-w '%{url_effective}' \
+			"https://github.com/tModLoader/tModLoader/releases/latest"); then
+			echo "Could not resolve the latest tModLoader release" >&2
+			return 1
+		fi
+
+		latest_release="${latest_url##*/}"
+		if [[ -z $latest_release || $latest_release == latest ]]; then
+			echo "GitHub did not return a tModLoader release tag" >&2
+			return 1
+		fi
+
+		printf '%s\n' "$latest_release"
 	fi
 }
 
 function install_tml_github {
-	echo "Installing TML from Github"
-	local ver="$(get_version)"
+	echo "Installing TML from GitHub"
 
-	# Allow nullglob so that if "v*.tar.gz" matches no entries it doesn't try to remove the literal name
+	local ver
+	local oldver
+	local file
+
+	if ! ver=$(get_version); then
+		return 1
+	fi
+
+	if [[ ! $ver =~ ^v[0-9]+(\.[0-9]+){3}$ ]]; then
+		echo "Invalid tModLoader release tag: $ver" >&2
+		return 1
+	fi
+
+	# Nullglob prevents backup cleanup from treating an unmatched pattern as a
+	# literal filename.
 	shopt -s nullglob
 
-	# If .ver exists we're doing an update instead, compare versions to see if it's already installed and backup if it isn't
 	if [[ -r .ver ]]; then
-		local oldver="$(cat .ver)"
+		if ! oldver=$(<.ver); then
+			echo "Could not read the installed tModLoader version" >&2
+			return 1
+		fi
+
+		if [[ ! $oldver =~ ^v[0-9]+(\.[0-9]+){3}$ ]]; then
+			echo "The installed tModLoader version is invalid: $oldver" >&2
+			return 1
+		fi
+
 		if [[ $ver == "$oldver" ]]; then
 			echo "Current tModLoader version ($ver) is up to date!"
-			return
+			return 0
 		fi
 
 		echo "New version $ver is wanted, current version is $oldver"
 
-		# Backup old tML versions in case something implodes
-		mkdir "$oldver"
+		if ! mkdir -- "$oldver"; then
+			return 1
+		fi
+
 		for file in *; do
-			if ! [[ $file == "manage-tModLoaderServer.sh" ]] && ! [[ $file == v*.tar.gz ]] && ! [[ $file == "$oldver" ]]; then
-				mv "$file" "$oldver" || exit 1
+			if [[ $file != "manage-tModLoaderServer.sh" &&
+				$file != v*.tar.gz &&
+				$file != "$oldver" ]]; then
+				if ! mv -- "$file" "$oldver"; then
+					return 1
+				fi
 			fi
 		done
 
-		# Delete all backups but the most recent if we aren't keeping them
 		if ! $keep_backups; then
 			echo "Removing old backups"
 			for file in v*.tar.gz; do
-				rm "$file" || exit 1
+				if ! rm -- "$file"; then
+					return 1
+				fi
 				echo "Removed old version $file"
 			done
 		fi
 
 		echo "Compressing $oldver backup"
-		tar czf "$oldver.tar.gz" "$oldver"/*
-		rm -r "$oldver"
+		if ! tar czf "$oldver.tar.gz" "$oldver"/*; then
+			return 1
+		fi
+		if ! rm -r -- "$oldver"; then
+			return 1
+		fi
 	fi
 
 	shopt -u nullglob
 
 	echo "Downloading version $ver"
-	curl -s -LJO "https://github.com/tModLoader/tModLoader/releases/download/$ver/tModLoader.zip" || exit 1
+	if ! curl -fL \
+		-o tModLoader.zip \
+		"https://github.com/tModLoader/tModLoader/releases/download/$ver/tModLoader.zip"; then
+		echo "Could not download tModLoader release $ver" >&2
+		return 1
+	fi
+
 	echo "Unzipping tModLoader.zip"
-	unzip -q tModLoader.zip
-	rm tModLoader.zip
-	echo "$ver" >.ver
+	if ! unzip -q tModLoader.zip; then
+		rm -f tModLoader.zip
+		echo "Could not extract tModLoader release $ver" >&2
+		return 1
+	fi
+
+	if ! rm -f tModLoader.zip; then
+		return 1
+	fi
+
+	if [[ ! -f LaunchUtils/ScriptCaller.sh ]]; then
+		echo "The tModLoader archive does not contain LaunchUtils/ScriptCaller.sh" >&2
+		return 1
+	fi
+
+	if ! printf '%s\n' "$ver" >.ver; then
+		echo "Could not record the installed tModLoader version" >&2
+		return 1
+	fi
 }
 
 function install_tml_steam {
 	echo "Installing TML from Steam"
 
 	if ! [[ -v username ]]; then
-		echo "Provide the --username flag in order to download TML from Steam"
-		exit 1
+		echo "Provide the --username flag in order to download TML from Steam" >&2
+		return 1
 	fi
 
-	# Installs tML, but all other steam assets will be in $HOME/Steam or $HOME/.steam
-	eval "$steam_cmd +force_install_dir $folder/server +login $username +app_update 1281930 +quit"
-
-	if [[ $? == "5" ]]; then
-		echo "Try entering password/2fa code again"
-		install_tml_steam
+	# tModLoader is installed under the selected server directory. Steam's other
+	# assets remain under $HOME/Steam or $HOME/.steam.
+	if ! "$steam_cmd" \
+		+force_install_dir "$folder/server" \
+		+login "$username" \
+		+app_update 1281930 \
+		+quit; then
+		echo "SteamCMD failed to install tModLoader" >&2
+		return 1
 	fi
 }
 
 function install_tml {
-	mkdir -p server
-	pushd server
-
-	if $github; then
-		install_tml_github
-	else
-		verify_steamcmd
-		install_tml_steam
+	if ! mkdir -p server; then
+		return 1
+	fi
+	if ! pushd server; then
+		return 1
 	fi
 
-	if [[ -f "$folder/serverconfig.txt" ]]; then
-		if [[ -f "serverconfig.txt" ]]; then
-			echo "Removing duplicate serverconfig.txt"
-			rm serverconfig.txt
+	if $github; then
+		if ! install_tml_github; then
+			popd
+			return 1
+		fi
+	else
+		if ! verify_steamcmd || ! install_tml_steam; then
+			popd
+			return 1
 		fi
 	fi
 
-	popd
+	if [[ -f "$folder/serverconfig.txt" && -f serverconfig.txt ]]; then
+		echo "Removing duplicate serverconfig.txt"
+		if ! rm serverconfig.txt; then
+			popd
+			return 1
+		fi
+	fi
+
+	if ! popd; then
+		return 1
+	fi
 
 	if ! is_in_docker; then
 		echo "Creating folder structure"
-		mkdir -p Mods Worlds
+		if ! mkdir -p Mods Worlds; then
+			return 1
+		fi
 	fi
 
-	# Install .NET
 	root_dir="$folder/server"
 	LogFile="$folder/server/tModLoader-Logs/DotNet.log"
-	if [[ -f "$root_dir/LaunchUtils/DotNetVersion.sh" ]]; then
-		. "$root_dir/LaunchUtils/DotNetVersion.sh"
-		chmod a+x "$root_dir/LaunchUtils/InstallDotNet.sh" && bash "$_"
-	else
-		echo "WARNING: .NET could not be pre-installed due to missing scripts. It should install on server start."
+	if [[ ! -f "$root_dir/LaunchUtils/DotNetVersion.sh" ||
+		! -f "$root_dir/LaunchUtils/InstallDotNet.sh" ]]; then
+		echo "The tModLoader release is missing its .NET installation scripts" >&2
+		return 1
+	fi
+
+	. "$root_dir/LaunchUtils/DotNetVersion.sh"
+
+	if ! chmod a+x "$root_dir/LaunchUtils/InstallDotNet.sh"; then
+		return 1
+	fi
+	if ! bash "$root_dir/LaunchUtils/InstallDotNet.sh"; then
+		echo "The tModLoader .NET installation failed" >&2
+		return 1
 	fi
 }
 
@@ -197,7 +289,11 @@ function configure_workshop_mods {
 		fi
 	done
 
-	unsupported_mod=$(find "$mods_dir" -type f -name '*.tmod' -print -quit) || exit 1
+	unsupported_mod=$(find "$mods_dir" \
+		\( -type f -o -type l \) \
+		-name '*.tmod' \
+		-print \
+		-quit) || exit 1
 	if [[ -n $unsupported_mod ]]; then
 		echo "Unsupported local mod file found: $unsupported_mod" >&2
 		echo "Configure every desired mod through TML_WORKSHOP_IDS and remove local .tmod files." >&2
@@ -281,8 +377,19 @@ function configure_workshop_mods {
 	done
 
 	local enabled_tmp
+	local enabled_mode
+	local creation_umask
 	local index
+
 	enabled_tmp=$(mktemp "$mods_dir/.enabled.json.XXXXXX") || exit 1
+	creation_umask=$(umask)
+	printf -v enabled_mode '%04o' "$((0666 & ~(8#$creation_umask)))"
+
+	if ! chmod "$enabled_mode" "$enabled_tmp"; then
+		rm -f "$enabled_tmp"
+		echo "Could not set permissions on generated mod configuration" >&2
+		exit 1
+	fi
 
 	if ! {
 		printf '[\n'
@@ -331,7 +438,6 @@ Options:
  --keepbackups       When installing with --github, keep all previous versions instead of deleting them when updating
  --tmlversion        Version of tModLoader to install. Only works if --github is provided. Functionally equivalent to the TMLVERSION env variable
  --steamcmdpath      Path to steamcmd.sh for Steam tModLoader downloads. Functionally equivalent to the STEAMCMDPATH env variable
- --tml-version       DEPRECATED: Kept for compatibility, but the --tmlversion flag or the TMLVERSION environment variable should be used instead
 
 Commands:
  install-tml         Installs tModLoader from Steam (or Github if --github is provided)
@@ -340,16 +446,23 @@ Commands:
 	exit
 }
 
+function require_option_value {
+	if [[ $# -lt 2 ]]; then
+		echo "$1 requires a value" >&2
+		exit 1
+	fi
+}
+
 github=false
 keep_backups=false
-start_args=""
+start_args=()
 
-if [ $# -eq 0 ]; then
+if [[ $# -eq 0 ]]; then
 	echo "No command supplied"
 	print_help
 fi
 
-# Covers cases where you only want to provide -h or -v without a command
+# Options that do not require a command remain available as the first argument.
 cmd="$1"
 if [[ ${cmd:0:1} != "-" ]]; then
 	shift
@@ -368,27 +481,39 @@ while [[ $# -gt 0 ]]; do
 		github=true
 		;;
 	-f | --folder)
+		require_option_value "$@"
 		folder="$2"
 		shift
 		;;
 	-u | --username)
+		require_option_value "$@"
 		username="$2"
 		shift
 		;;
 	--keepbackups)
 		keep_backups=true
 		;;
-	--tmlversion | --tml-version)
+	--tmlversion)
+		require_option_value "$@"
 		tml_version="$2"
 		github=true
 		shift
 		;;
 	--steamcmdpath)
+		require_option_value "$@"
 		steamcmd_path="$2"
 		shift
 		;;
+	-config | -steamworkshopfolder | -tmlsavedirectory)
+		echo "$1 is managed by the container launcher and cannot be overridden" >&2
+		exit 1
+		;;
 	*)
-		start_args="$start_args $1"
+		if [[ $cmd != start ]]; then
+			echo "Unknown option for $cmd: $1" >&2
+			exit 1
+		fi
+		start_args+=("$1")
 		;;
 	esac
 	shift
@@ -404,35 +529,84 @@ if ! [[ -v folder ]]; then
 	folder="$(dirname "$(realpath "$0")")"
 fi
 
-mkdir -p "$folder" && pushd "$_"
+if ! mkdir -p -- "$folder"; then
+	exit 1
+fi
+if ! folder=$(cd -- "$folder" && pwd -P); then
+	echo "Could not resolve the server data directory" >&2
+	exit 1
+fi
+if ! pushd "$folder"; then
+	exit 1
+fi
 
 case $cmd in
 install-tml)
-	install_tml
+	if ! install_tml; then
+		exit 1
+	fi
 	;;
 start)
-	# Edge-case for ScriptCaller.sh where dotnet exists but TML logs don't yet
+	# ScriptCaller must not reject the first launch before its log exists.
 	export SKIP_DOTNET_LOGCHECK=1
 
-	if is_in_docker; then
-		mkdir -p "$folder/Mods" "$folder/Worlds"
+	if ! machine_has setsid; then
+		echo "setsid must be installed to launch and stop the server safely" >&2
+		exit 1
+	fi
 
-		cat "dotnet installed via management script... pending first server start..." >>"$HOME/server/tModLoader-Logs/server.log"
-		cd "$HOME/server" || exit
-	elif ! [[ -f "$folder/server/LaunchUtils/ScriptCaller.sh" ]]; then
-		echo "A tModLoader server is not installed yet, please run the install-tml command before starting a server"
+	if is_in_docker; then
+		if ! mkdir -p "$folder/Mods" "$folder/Worlds"; then
+			exit 1
+		fi
+
+		if ! printf '%s\n' \
+			'dotnet installed via management script... pending first server start...' \
+			>>"$HOME/server/tModLoader-Logs/server.log"; then
+			exit 1
+		fi
+		cd "$HOME/server" || exit 1
+	elif [[ ! -f "$folder/server/LaunchUtils/ScriptCaller.sh" ]]; then
+		echo "A tModLoader server is not installed yet; run install-tml before starting it" >&2
 		exit 1
 	else
-		cd "$folder/server" || exit
+		cd "$folder/server" || exit 1
 	fi
 
 	configure_workshop_mods
 
-	# NOTE: Technically BASH_SOURCE is >= Bash 3.0, but this version is over 20 years old so the chance of any issues is minimal
-	sed -i 's|cd "$(dirname "$0")"|cd "$(dirname "${BASH_SOURCE[0]}")"|' ./LaunchUtils/ScriptCaller.sh
+	if ! chmod +x ./LaunchUtils/ScriptCaller.sh; then
+		exit 1
+	fi
 
-	chmod +x ./LaunchUtils/ScriptCaller.sh
-	source ./LaunchUtils/ScriptCaller.sh -server -config "$folder/serverconfig.txt" -steamworkshopfolder "$folder/steamapps/workshop" -tmlsavedirectory "$folder" $start_args
+	setsid ./LaunchUtils/ScriptCaller.sh \
+		-server \
+		-config "$folder/serverconfig.txt" \
+		-steamworkshopfolder "$folder/steamapps/workshop" \
+		-tmlsavedirectory "$folder" \
+		"${start_args[@]}" &
+	server_pid=$!
+
+	forward_server_signal() {
+		kill -s "$1" -- "-$server_pid" 2>/dev/null || :
+	}
+
+	trap 'forward_server_signal TERM' TERM
+	trap 'forward_server_signal INT' INT
+	trap 'forward_server_signal HUP' HUP
+
+	server_status=0
+	while true; do
+		wait "$server_pid"
+		server_status=$?
+
+		if ! kill -0 "$server_pid" 2>/dev/null; then
+			break
+		fi
+	done
+
+	trap - TERM INT HUP
+	exit "$server_status"
 	;;
 *)
 	echo "Invalid Command: $cmd"

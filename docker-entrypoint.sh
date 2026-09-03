@@ -17,7 +17,8 @@ validate_id() {
 		;;
 	esac
 
-	if [ "$id_value" -gt 2147483647 ]; then
+	if [ "${#id_value}" -gt 10 ] ||
+		{ [ "${#id_value}" -eq 10 ] && [ "$id_value" \> 2147483647 ]; }; then
 		fail "$id_name must not exceed 2147483647"
 	fi
 }
@@ -43,6 +44,9 @@ fi
 if [ "$(awk -F: '$1 == "tml" { count++ } END { print count + 0 }' /etc/group)" -ne 1 ]; then
 	fail "the image must contain exactly one tml group"
 fi
+
+current_tml_uid=$(awk -F: '$1 == "tml" { print $3 }' /etc/passwd)
+current_tml_gid=$(awk -F: '$1 == "tml" { print $3 }' /etc/group)
 
 uid_owner=$(awk -F: -v wanted="$TML_UID" \
 	'$3 == wanted && $1 != "tml" { print $1; exit }' /etc/passwd)
@@ -91,7 +95,15 @@ passwd_tmp=
 trap - EXIT HUP INT TERM
 
 mkdir -p /tModLoader
-chown -R "$TML_UID:$TML_GID" /home/tml /tModLoader
+
+if [ "$current_tml_uid" != "$TML_UID" ] ||
+	[ "$current_tml_gid" != "$TML_GID" ]; then
+	chown -R "$TML_UID:$TML_GID" /home/tml
+fi
+
+# Persistent data may have been restored with arbitrary ownership, so it is
+# reconciled on every startup.
+chown -R "$TML_UID:$TML_GID" /tModLoader
 
 umask "$UMASK"
 

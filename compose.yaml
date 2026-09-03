@@ -6,6 +6,7 @@ services:
     platform: linux/amd64
     container_name: tml
     restart: unless-stopped
+    stop_grace_period: 2m
 
     environment:
       # Set these to the output of `id -u` and `id -g` on the Linux host.
@@ -40,12 +41,8 @@ services:
 
     # Supply server arguments as a YAML list below.
     #
-    # Alternatively, create ./tModLoader/serverconfig.txt and replace this
-    # command with:
-    #
-    # command:
-    #   - -config
-    #   - /tModLoader/serverconfig.txt
+    # Alternatively, create ./tModLoader/serverconfig.txt and remove this
+    # command section. The container launcher always reads that exact path.
     #
     # Configuration-file-only settings include difficulty, language, worldpath,
     # upnp, npcstream, priority, and Journey Mode power permissions.
@@ -56,11 +53,6 @@ services:
     #
     # Configuration changes take effect after the server is restarted.
     command:
-      # Store worlds, mods, configuration, logs, and Workshop content in the
-      # persistent directory mounted below.
-      - -tmlsavedirectory
-      - /tModLoader
-
       # Exact container path to the world file. Supplying -world causes the
       # server to load the world and start automatically.
       - -world
