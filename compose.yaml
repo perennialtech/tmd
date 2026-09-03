@@ -1,17 +1,49 @@
 services:
   tml:
+    # The image contains the server installation. Persistent server data belongs
+    # in /tModLoader; do not mount over the installation under /home/tml.
     image: ghcr.io/perennialtech/tmd:latest
     platform: linux/amd64
     container_name: tml
     restart: unless-stopped
+
     environment:
       # Set these to the output of `id -u` and `id -g` on the Linux host.
+      #
+      # Both IDs must be canonical positive decimal integers no greater than
+      # 2147483647 and must not conflict with another account in the image.
+      # At startup, the container recursively assigns /home/tml and /tModLoader
+      # to this identity before launching the server.
       TML_UID: "1000"
       TML_GID: "1000"
+
+      # Use three or four octal digits. Keep this value quoted so YAML preserves
+      # its leading zeroes.
       UMASK: "0002"
+
     ports:
+      # The container-side port must match `port` in serverconfig.txt or the
+      # value passed through the `-port` command-line argument.
       - "7777:7777"
+
+    # Keep the server console attached so Docker can accept interactive console
+    # commands such as `save` and `exit`.
     tty: true
     stdin_open: true
+
+    # Optional server arguments belong in YAML list form so spaces and argument
+    # boundaries are preserved. Use container paths for persistent files.
+    #
+    # command:
+    #   - -world
+    #   - /tModLoader/Worlds/world.wld
+    #   - -autocreate
+    #   - "2"
+    #   - -worldname
+    #   - Terraria
+
     volumes:
+      # This directory contains worlds, saves, serverconfig.txt, local mods,
+      # enabled.json, install.txt, and downloaded Workshop content. Stop the
+      # server before backing it up so world files are consistent.
       - ./tModLoader:/tModLoader
