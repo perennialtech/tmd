@@ -9,16 +9,16 @@ script_url="https://raw.githubusercontent.com/tModLoader/tModLoader/1.4.5/patche
 
 # Shut up both commands
 function pushd {
-	command pushd "$@" > /dev/null || return
+	command pushd "$@" >/dev/null || return
 }
 
 function popd {
-	command popd > /dev/null || return
+	command popd >/dev/null || return
 }
 
 # Copied from BashUtils.sh so there's no need for a dependency on it
 function machine_has {
-	command -v "$1" > /dev/null 2>&1
+	command -v "$1" >/dev/null 2>&1
 	return $?
 }
 
@@ -35,7 +35,7 @@ function update_script {
 	latest_script_version=$(curl -s "$script_url" 2>/dev/null | grep "script_version=" | head -n1 | cut -d '"' -f2)
 
 	local new_version=$(echo -e "$script_version\n$latest_script_version" | sort -rV | head -n1)
-	if [[ "$script_version" = "$new_version" ]]; then
+	if [[ $script_version == "$new_version" ]]; then
 		echo "No script update found"
 		return
 	fi
@@ -45,15 +45,15 @@ function update_script {
 		return
 	fi
 
-	if [[ "${script_version:0:1}" != "${new_version:0:1}" ]]; then
+	if [[ ${script_version:0:1} != "${new_version:0:1}" ]]; then
 		read -t 20 -p "A major version change has been detected (v$script_version -> v$new_version) Major versions mean incompatibilities with previous versions, so you should check the wiki for any updates to how the script works. Update anyways? (y/n): " update_major
-		if [[ "$update_major" != [Yy]* ]]; then
+		if [[ $update_major != [Yy]* ]]; then
 			echo "Skipping major version update"
 			return
 		fi
 	else
 		read -t 10 -p "An update for the management script is available (v$script_version -> v$new_version). Update now? (y/n): " update_minor
-		if [[ "$update_minor" != [Yy]* ]]; then
+		if [[ $update_minor != [Yy]* ]]; then
 			echo "Skipping version update"
 			return
 		fi
@@ -73,7 +73,7 @@ function update_script {
 function verify_steamcmd {
 	# Prioritize an ENV Variable
 	if [[ -v STEAMCMDPATH ]]; then
-		if ! [[ -f "$STEAMCMDPATH" ]]; then
+		if ! [[ -f $STEAMCMDPATH ]]; then
 			echo "STEAMCMDPATH is set to a file that does not exist"
 			exit 1
 		fi
@@ -82,7 +82,7 @@ function verify_steamcmd {
 	fi
 
 	if [[ -v steamcmd_path ]]; then
-		if ! [[ -f "$steamcmd_path" ]]; then
+		if ! [[ -f $steamcmd_path ]]; then
 			echo "--steamcmdpath is set to a file that does not exist"
 			exit 1
 		fi
@@ -91,7 +91,7 @@ function verify_steamcmd {
 	fi
 
 	steam_cmd=$(command -v steamcmd)
-	if [[ -z "$steam_cmd" ]]; then
+	if [[ -z $steam_cmd ]]; then
 		echo "steamcmd could not be found in PATH, please install steamcmd or provide the STEAMCMDPATH environment variable"
 		exit 1
 	fi
@@ -124,7 +124,7 @@ function install_tml_github {
 	# If .ver exists we're doing an update instead, compare versions to see if it's already installed and backup if it isn't
 	if [[ -r .ver ]]; then
 		local oldver="$(cat .ver)"
-		if [[ "$ver" = "$oldver" ]]; then
+		if [[ $ver == "$oldver" ]]; then
 			echo "Current tModLoader version ($ver) is up to date!"
 			return
 		fi
@@ -134,7 +134,7 @@ function install_tml_github {
 		# Backup old tML versions in case something implodes
 		mkdir "$oldver"
 		for file in *; do
-			if ! [[ "$file" = "manage-tModLoaderServer.sh" ]] && ! [[ "$file" = v*.tar.gz ]] && ! [[ "$file" = "$oldver" ]]; then
+			if ! [[ $file == "manage-tModLoaderServer.sh" ]] && ! [[ $file == v*.tar.gz ]] && ! [[ $file == "$oldver" ]]; then
 				mv "$file" "$oldver" || exit 1
 			fi
 		done
@@ -160,7 +160,7 @@ function install_tml_github {
 	echo "Unzipping tModLoader.zip"
 	unzip -q tModLoader.zip
 	rm tModLoader.zip
-	echo "$ver" > .ver
+	echo "$ver" >.ver
 }
 
 function install_tml_steam {
@@ -174,7 +174,7 @@ function install_tml_steam {
 	# Installs tML, but all other steam assets will be in $HOME/Steam or $HOME/.steam
 	eval "$steam_cmd +force_install_dir $folder/server +login $username +app_update 1281930 +quit"
 
-	if [[ $? = "5" ]]; then
+	if [[ $? == "5" ]]; then
 		echo "Try entering password/2fa code again"
 		install_tml_steam
 	fi
@@ -218,7 +218,7 @@ function install_tml {
 
 function install_workshop_mods {
 	verify_steamcmd
-	
+
 	if ! [[ -d "Mods" ]]; then
 		echo "Mods folder does not exist, please run install-tml command or create a 'Mods' folder before installing mods"
 		exit
@@ -239,7 +239,7 @@ function install_workshop_mods {
 	while read -r line; do
 		lines=$((lines + 1))
 		steamcmd_command="$steamcmd_command +workshop_download_item 1281930 $line"
-	done <install.txt 
+	done <install.txt
 
 	eval "'$steam_cmd' +force_install_dir '$folder' +login anonymous$steamcmd_command +quit"
 
@@ -250,7 +250,7 @@ function install_workshop_mods {
 
 function print_help {
 	echo \
-"tML dedicated server installation and maintenance script
+		"tML dedicated server installation and maintenance script
 
 Usage: script.sh COMMAND [OPTIONS]
 
@@ -289,45 +289,45 @@ fi
 
 # Covers cases where you only want to provide -h or -v without a command
 cmd="$1"
-if [[ "${cmd:0:1}" != "-" ]]; then
+if [[ ${cmd:0:1} != "-" ]]; then
 	shift
 fi
 
 while [[ $# -gt 0 ]]; do
 	case $1 in
-		-h|--help)
-			print_help
-			;;
-		-v|--version)
-			echo "tML Dedicated Server Tool v$script_version"
-			exit
-			;;
-		-g|--github)
-			github=true
-			;;
-		-f|--folder)
-			folder="$2"
-			shift
-			;;
-		-u|--username)
-			username="$2"
-			shift
-			;;
-		--keepbackups)
-			keep_backups=true
-			;;
-		--tmlversion|--tml-version)
-			tml_version="$2"
-			github=true
-			shift
-			;;
-		--steamcmdpath)
-			steamcmd_path="$2"
-			shift
-			;;
-		*)
-			start_args="$start_args $1"
-			;;
+	-h | --help)
+		print_help
+		;;
+	-v | --version)
+		echo "tML Dedicated Server Tool v$script_version"
+		exit
+		;;
+	-g | --github)
+		github=true
+		;;
+	-f | --folder)
+		folder="$2"
+		shift
+		;;
+	-u | --username)
+		username="$2"
+		shift
+		;;
+	--keepbackups)
+		keep_backups=true
+		;;
+	--tmlversion | --tml-version)
+		tml_version="$2"
+		github=true
+		shift
+		;;
+	--steamcmdpath)
+		steamcmd_path="$2"
+		shift
+		;;
+	*)
+		start_args="$start_args $1"
+		;;
 	esac
 	shift
 done
@@ -347,46 +347,46 @@ fi
 mkdir -p "$folder" && pushd "$_"
 
 case $cmd in
-	update-script)
-		# NOOP because the script automatically checks for an update before thiss
-		;;
-	install-mods)
+update-script)
+	# NOOP because the script automatically checks for an update before thiss
+	;;
+install-mods)
+	install_workshop_mods
+	;;
+install-tml)
+	install_tml
+	;;
+install)
+	install_tml
+	install_workshop_mods
+	;;
+start)
+	# Edge-case for ScriptCaller.sh where dotnet exists but TML logs don't yet
+	export SKIP_DOTNET_LOGCHECK=1
+
+	if is_in_docker; then
+		mkdir -p "$folder/Mods" "$folder/Worlds"
 		install_workshop_mods
-		;;
-	install-tml)
-		install_tml
-		;;
-	install)
-		install_tml
-		install_workshop_mods
-		;;
-	start)
-		# Edge-case for ScriptCaller.sh where dotnet exists but TML logs don't yet
-		export SKIP_DOTNET_LOGCHECK=1
 
-		if is_in_docker; then
-			mkdir -p "$folder/Mods" "$folder/Worlds"
-			install_workshop_mods
+		cat "dotnet installed via management script... pending first server start..." >>"$HOME/server/tModLoader-Logs/server.log"
+		cd "$HOME/server" || exit
+	elif ! [[ -f "$folder/server/LaunchUtils/ScriptCaller.sh" ]]; then
+		echo "A tModLoader server is not installed yet, please run the install or install-tml command before starting a server"
+		exit 1
+	else
+		cd "$folder/server" || exit
+	fi
 
-			cat "dotnet installed via management script... pending first server start..." >> "$HOME/server/tModLoader-Logs/server.log"
-			cd "$HOME/server" || exit
-		elif ! [[ -f "$folder/server/LaunchUtils/ScriptCaller.sh" ]]; then
-			echo "A tModLoader server is not installed yet, please run the install or install-tml command before starting a server"
-			exit 1
-		else
-			cd "$folder/server" || exit
-		fi
+	# NOTE: Technically BASH_SOURCE is >= Bash 3.0, but this version is over 20 years old so the chance of any issues is minimal
+	sed -i 's|cd "$(dirname "$0")"|cd "$(dirname "${BASH_SOURCE[0]}")"|' ./LaunchUtils/ScriptCaller.sh
 
-		# NOTE: Technically BASH_SOURCE is >= Bash 3.0, but this version is over 20 years old so the chance of any issues is minimal
-		sed -i 's|cd "$(dirname "$0")"|cd "$(dirname "${BASH_SOURCE[0]}")"|' ./LaunchUtils/ScriptCaller.sh
-
-		chmod +x ./LaunchUtils/ScriptCaller.sh
-		source ./LaunchUtils/ScriptCaller.sh -server -config "$folder/serverconfig.txt" -steamworkshopfolder "$folder/steamapps/workshop" -tmlsavedirectory "$folder" $start_args
-		;;
-	*)
-		echo "Invalid Command: $1"
-		print_help
-		;;
+	chmod +x ./LaunchUtils/ScriptCaller.sh
+	source ./LaunchUtils/ScriptCaller.sh -server -config "$folder/serverconfig.txt" -steamworkshopfolder "$folder/steamapps/workshop" -tmlsavedirectory "$folder" $start_args
+	;;
+*)
+	echo "Invalid Command: $1"
+	print_help
+	;;
 esac
 
 popd
