@@ -22,8 +22,8 @@ services:
       UMASK: "0002"
 
     ports:
-      # The container-side port must match `port` in serverconfig.txt or the
-      # value passed through the `-port` command-line argument.
+      # The container-side port must match the value supplied with -port or the
+      # port setting in serverconfig.txt.
       - "7777:7777"
 
     # Keep the server console attached so Docker can accept interactive console
@@ -31,19 +31,117 @@ services:
     tty: true
     stdin_open: true
 
-    # Optional server arguments belong in YAML list form so spaces and argument
-    # boundaries are preserved. Use container paths for persistent files.
+    # Supply server arguments as a YAML list below.
+    #
+    # Alternatively, create ./tModLoader/serverconfig.txt and replace this
+    # command with:
     #
     # command:
-    #   - -world
-    #   - /tModLoader/Worlds/world.wld
-    #   - -autocreate
-    #   - "2"
-    #   - -worldname
-    #   - Terraria
+    #   - -config
+    #   - /tModLoader/serverconfig.txt
+    #
+    # Configuration-file-only settings include difficulty, language, worldpath,
+    # upnp, npcstream, priority, and Journey Mode power permissions.
+    #
+    # References:
+    # https://github.com/tModLoader/tModLoader/blob/1.4.5/patches/tModLoader/Terraria/release_extras/serverconfig.txt
+    # https://terraria.wiki.gg/wiki/Server#Server_config_file
+    #
+    # Configuration changes take effect after the server is restarted.
+    command:
+      # Store worlds, mods, configuration, logs, and Workshop content in the
+      # persistent directory mounted below.
+      - -tmlsavedirectory
+      - /tModLoader
+
+      # Exact container path to the world file. Supplying -world causes the
+      # server to load the world and start automatically.
+      - -world
+      - /tModLoader/Worlds/world.wld
+
+      # Create a world when the file specified above does not exist.
+      # Valid values: 1 (small), 2 (medium), or 3 (large).
+      - -autocreate
+      - "2"
+
+      # Name used when creating a world. Do not include the .wld extension.
+      - -worldname
+      - Terraria
+
+      # Optional seed used only when automatically creating a new world.
+      # Remove the leading comment markers to enable it.
+      # - -seed
+      # - AwesomeSeed
+
+      # Listen on every network interface inside the container.
+      - -ip
+      - 0.0.0.0
+
+      # Internal server listening port. The published container port above must
+      # use the same container-side value.
+      - -port
+      - "7777"
+
+      # Maximum number of players. Valid values are 1 through 255.
+      - -maxplayers
+      - "8"
+
+      # Server password. Leave the value empty to disable password protection.
+      - -password
+      - ""
+
+      # Message displayed to players when they join.
+      - -motd
+      - Welcome to the tModLoader server!
+
+      # Persist the ban list with the rest of the server data.
+      - -banlist
+      - /tModLoader/banlist.txt
+
+      # Add the server's additional cheat protection.
+      - -secure
+
+      # Docker publishes the server port, so automatic router configuration
+      # from inside the container is normally undesirable.
+      - -noupnp
+
+      # Disable Steam networking and use direct-IP connections. To use Steam
+      # networking, remove -nosteam and enable the -steam options below.
+      - -nosteam
+
+      # Directory containing manually installed .tmod files. Workshop content
+      # downloaded by tModLoader remains under /tModLoader/steamapps.
+      - -modpath
+      - /tModLoader/Mods
+
+      # Optional: load only the mods belonging to a named mod pack.
+      # - -modpack
+      # - MyModpack
+
+      # Optional: enable Steam networking. Remove -nosteam before enabling.
+      # - -steam
+
+      # Optional: configure the Steam lobby. Requires -steam.
+      # Valid values: friends or private.
+      # - -lobby
+      # - friends
+
+      # Optional: set process priority. When supplied, this overrides priority
+      # from serverconfig.txt. Values are implementation/platform dependent;
+      # Terraria documents 0 through 5, with 3 representing Normal.
+      # - -forcepriority
+      # - "3"
+
+      # Optional: prevent wired Announcement Boxes from broadcasting messages.
+      # - -disableannouncementbox
+
+      # Optional: set Announcement Box range in pixels. Use -1 for server-wide
+      # announcements.
+      # - -announcementboxrange
+      # - "-1"
 
     volumes:
       # This directory contains worlds, saves, serverconfig.txt, local mods,
-      # enabled.json, install.txt, and downloaded Workshop content. Stop the
-      # server before backing it up so world files are consistent.
+      # enabled.json, install.txt, logs, ban lists, and downloaded Workshop
+      # content.
       - ./tModLoader:/tModLoader

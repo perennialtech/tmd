@@ -46,29 +46,6 @@ Steam Workshop uses numeric Workshop IDs rather than mod names. A tModLoader mod
 
 The container installs entries from `install.txt` during startup. No Workshop mods are downloaded when that file is absent.
 
-## Server configuration
-
-For non-interactive startup, supply server arguments as container command arguments or create `tModLoader/serverconfig.txt`.
-
-An example configuration is available from the tModLoader project:
-
-<https://github.com/tModLoader/tModLoader/blob/1.4.5/patches/tModLoader/Terraria/release_extras/serverconfig.txt>
-
-Important settings include:
-
-- `worldname` sets the name used when creating a world. Do not include `.wld`.
-- `world` sets the exact world path. Use a container path such as `/tModLoader/Worlds/world.wld`.
-- `autocreate=1`, `autocreate=2`, or `autocreate=3` creates a small, medium, or large world when the configured world does not exist.
-- `port=7777` selects the server's internal listening port.
-- `maxplayers` sets the player limit.
-- `password` sets the server password.
-
-Additional settings are documented on the Terraria wiki:
-
-<https://terraria.wiki.gg/wiki/Server#Server_config_file>
-
-Configuration changes take effect after the server is restarted.
-
 ## Backups
 
 Stop the server before taking a filesystem-level backup so world files are consistent.
