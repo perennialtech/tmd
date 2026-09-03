@@ -106,11 +106,10 @@ Back up the complete `tModLoader` directory. When restoring it, ensure its conte
 
 [`manage-tModLoaderServer.sh`](./manage-tModLoaderServer.sh) supports Linux installations that do not use Docker.
 
-Place the script in the intended tModLoader data directory and make it executable:
+Place the script in the intended tModLoader data directory:
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/perennialtech/tmd/master/manage-tModLoaderServer.sh
-chmod +x manage-tModLoaderServer.sh
 ```
 
 Show all commands and options with:
