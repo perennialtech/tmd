@@ -14,7 +14,6 @@ invalid_output="$test_root/invalid-output"
 
 mkdir -p \
 	"$home_dir/server/LaunchUtils" \
-	"$home_dir/server/tModLoader-Logs" \
 	"$data_dir"
 
 cat >"$home_dir/server/LaunchUtils/ScriptCaller.sh" <<'EOF'

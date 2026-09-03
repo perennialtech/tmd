@@ -579,7 +579,10 @@ start)
 	fi
 
 	if is_in_docker; then
-		if ! mkdir -p "$folder/Mods" "$folder/Worlds"; then
+		if ! mkdir -p \
+			"$folder/Mods" \
+			"$folder/Worlds" \
+			"$HOME/server/tModLoader-Logs"; then
 			exit 1
 		fi
 
