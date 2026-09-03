@@ -5,7 +5,7 @@
 
 # Only update the major version when a breaking change is introduced
 script_version="4.0.0.1"
-script_url="https://raw.githubusercontent.com/tModLoader/tModLoader/1.4.5/patches/tModLoader/Terraria/release_extras/DedicatedServerUtils/manage-tModLoaderServer.sh"
+script_url="https://raw.githubusercontent.com/perennialtech/tmd/master/manage-tModLoaderServer.sh"
 
 # Shut up both commands
 function pushd {

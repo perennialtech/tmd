@@ -1,24 +1,17 @@
-version: "3.0"
-
 services:
   tml:
+    image: ghcr.io/perennialtech/tmd:latest
+    platform: linux/amd64
     container_name: tml
     restart: unless-stopped
-    #platform: linux/amd64 # Enable if you are running Docker on an ARM machine
-    build:
-      context: .
-      # args:
-      #   TMLVERSION: v2023.8.3.3
-      #   UID: 1000
-      #   GID: 1000
+    environment:
+      # Set these to the output of `id -u` and `id -g` on the Linux host.
+      TML_UID: "1000"
+      TML_GID: "1000"
+      UMASK: "0002"
     ports:
-      - 7777:7777
+      - "7777:7777"
     tty: true
     stdin_open: true
     volumes:
       - ./tModLoader:/tModLoader
-      # Optional volumes below. These files/folders MUST exist on the host
-      # before they can be mounted, otherwise they will appear as owned by root
-      #- ./tModLoader/logs:/home/tml/server/tModLoader-Logs
-      #- ./tModLoader/banlist.txt:/home/tml/server/banlist.txt
-      #- ./tModLoader/cli-argsConfig.txt:/home/tml/server/cli-argsConfig.txt

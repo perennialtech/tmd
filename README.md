@@ -1,139 +1,338 @@
-# Dedicated Server Utils
+# tModLoader Dedicated Server
 
-This directory contains utilities for a dedicated server on Linux or Docker
+This repository provides a tModLoader dedicated-server container and a standalone Linux management script.
 
----
+Repository: <https://github.com/perennialtech/tmd>
 
-## ARM64 Linux Support
+## Supported Docker Platform
 
-Linux ARM64 (aarch64) is natively supported as of tModLoader 1.4.4. No extra workarounds are required — you can install directly from Steam or GitHub releases.
+The Docker stack supports **Linux hosts only**. The published image is a `linux/amd64` image and is intended for an x86-64 Linux Docker Engine.
 
-If you are using **tModLoader 1.4.3 or earlier**, the Steamworks.NET library did not support ARM in its managed code. For those legacy versions only, use the [20.1.0 Release build on this fork](https://github.com/MikolajKolek/Steamworks.NET-arm64/releases/tag/20.1.0) by [MikolajKolek](https://github.com/MikolajKolek) and replace the existing `.dll` in `Libraries/Steamworks.net/20.1.0/lib/netstandard2.1`.
----
+Windows, macOS, Docker Desktop, and native ARM64 Docker hosts are not supported. The standalone management script can use tModLoader's native Linux ARM64 support where SteamCMD is available or not required.
 
 ## Quick Links
 
-### Preinstall Steps (REQUIRED)
+- [Docker installation](#docker-installation)
+- [Docker configuration](#docker-configuration)
+- [Mods](#mods)
+- [Server configuration](#server-configuration)
+- [Updating Docker](#updating-docker)
+- [Standalone management script](#standalone-management-script)
 
-- [Specific Folder Structure](#preinstall-folder-structure)
+## Docker Installation
 
-### Installation
+A new stack requires only `compose.yaml`. The image is pulled from GitHub Container Registry, and the `tModLoader` data directory is created automatically.
 
-- [Docker (recommended)](#using-the-docker-container)
+### Prerequisites
 
-- [Management Script](#using-the-management-script)
+- An x86-64 Linux host
+- Docker Engine
+- Docker Compose V2, verified with:
 
-- [Installing Mods](#mod-installation)
+  ```sh
+  docker compose version
+  ```
 
-[Server Configuration](#server-configuration)
+### Install from an empty directory
 
-[Updating the Management Script](#updating-the-management-script)
+1. Create and enter a directory for the stack:
 
-## Preinstall Folder Structure
+   ```sh
+   mkdir tmd
+   cd tmd
+   ```
 
-Both the Docker and Management script **require** the same folder structure, so make sure it's setup properly before installing. Here is what is should look like:
+2. Download the Compose file:
 
+   ```sh
+   curl -fsSLO https://raw.githubusercontent.com/perennialtech/tmd/master/compose.yaml
+   ```
+
+3. Find the Linux user and group IDs that should own the server data:
+
+   ```sh
+   id -u
+   id -g
+   ```
+
+4. Set `TML_UID` and `TML_GID` in `compose.yaml` to those values.
+
+5. Pull and start the server:
+
+   ```sh
+   docker compose pull
+   docker compose up -d
+   ```
+
+On first startup, Docker creates `./tModLoader`. The container assigns it to the configured identity and creates the `Mods` and `Worlds` directories.
+
+If the server requires interactive first-run configuration, attach to its console:
+
+```sh
+docker attach tml
 ```
-compose.yaml (Docker version only)
-Dockerfile (Docker version only)
-tModLoader
-├── Mods
-│   ├── localmod1.tmod
-│   ├── localmod2.tmod
-│   ├── enabled.json
-│   └── install.txt
-├── Worlds
-│   ├── world1.twld
-│   ├── world1.wld
-│   ├── world2.twld
-│   └── world2.wld
-├── server (automatically created, management script version only)
-│   └── * contains tModLoader installation *
-├── steamapps (automatically created)
-│   └── * contains Steam workshop mods *
-├── manage-tModLoaderServer.sh (management script version only)
-├── serverconfig.txt (optional)
-└── tmlversion.txt (optional)
+
+Detach without stopping the server by pressing `Ctrl-P`, followed by `Ctrl-Q`.
+
+### Resulting files
+
+After startup, the stack has this structure:
+
+```text
+compose.yaml
+tModLoader/
+├── Mods/
+├── Worlds/
+├── steamapps/
+├── serverconfig.txt       # optional
+└── tmlversion.txt         # optional modpack metadata
 ```
 
-### Obtaining install.txt and enabled.json
+The server installation itself is supplied by the image. Persistent saves, worlds, configuration, mods, and Workshop content belong under `./tModLoader`.
 
-`install.txt` and `enabled.json` are needed for any mods you wish to install from the Steam Workshop.
-The steam workshop does not use mod names to identify mods, so a modpack should be made to install mods from the workshop
+## Docker Configuration
 
-1. From the TML main menu, go to Workshop -> Mod Packs
-2. Click `Save Enabled as New Mod Pack`
-3. Click `Open Mod Pack Folder`
-4. Enter the folder with the name of your modpack
-5. Make a `Mods` folder and copy `install.txt` and `enabled.json` file into it
-6. **Management Script Version Only**: Run `./manage-tModLoaderServer.sh install-mods` to install the mods on your server
+The Compose file uses these environment variables:
 
----
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `TML_UID` | Yes | `1000` | Positive Linux UID used by the server process and persistent files |
+| `TML_GID` | Yes | `1000` | Positive Linux GID used by the server process and persistent files |
+| `UMASK` | No | `0002` | Three- or four-digit octal process umask |
 
-## Using The Docker Container
+Use quoted values in YAML so leading zeroes in `UMASK` are preserved:
 
-### Installation
+```yaml
+environment:
+  TML_UID: "1000"
+  TML_GID: "1000"
+  UMASK: "0002"
+```
 
-1. First, ensure you have a proper [folder structure](#preinstall-folder-structure)
-   - It is also **highly** recommended to create a [serverconfig.txt](#server-configuration) file. This makes it so when you start the container you don't have to attach to manually configure the server
-2. Install `docker` from your package manager or [Docker's Official Page](https://docs.docker.com/engine/install/)
-   - **To check if Compose V2 is installed in this package**, run `docker compose version`. If the command errors, your manager still uses V1 and will need to additionally install the `docker-compose` package. All commands below assume Compose V2 is installed, so if you have V1 replace any `docker compose` commands with `docker-compose`
-3. Download [docker-compose.yml](https://github.com/tModLoader/tModLoader/tree/1.4.4/patches/tModLoader/Terraria/release_extras/DedicatedServerUtils/docker-compose.yml) and the [Dockerfile](https://github.com/tModLoader/tModLoader/tree/1.4.4/patches/tModLoader/Terraria/release_extras/DedicatedServerUtils/Dockerfile)
-4. Edit `docker-compose.yml` with your GID and UID. These can be found by running `id`, and generally default to 1000
-   - **IMPORTANT:** Make sure all files in the `tModLoader` folder have this same UID/GID. This can be set by running `chown -R UID:GID tModLoader`
-   - You can optionally also set the `TMLVERSION` arg to get a specific tModLoader version
-5. Run `docker compose up -d`. This command will create the `Mods` and `Worlds` directories if they don't already exist
-   - To attach to the server console run `docker attach tml`. To detach from the console press `Ctrl-P Ctrl-Q` to avoid shutting down or `Ctrl-C` to detach and shutdown the server
+`TML_UID` and `TML_GID` must:
 
-### Running Commands
+- be canonical positive decimal integers;
+- not be zero;
+- not exceed `2147483647`; and
+- not conflict with another account inside the image.
 
-To run commands inside the container, run `docker exec -it tml execute "YOUR COMMAND"`. An example hello world would be `docker exec -it tml execute "say Hello World!"`. The quotes are required around the entire command because tmux can only accept one argument to be passed, otherwise the command is sent as a single word without spaces
+At every container start, ownership under `/home/tml` and `/tModLoader` is normalized to the configured IDs. This permits Docker to create the bind-mounted host directory as root while ensuring the server can write to it. It also means the configured identity becomes the owner of all existing files in `./tModLoader`.
 
-### Updating
+### Ports
 
-To update, download the newest container and rebuild it using `docker compose build` to update tModLoader. Mods will be updated as well. If the container doesn't rebuild you can force rebuilding by running `docker compose build --no-cache`
+The server listens on TCP port `7777`. To publish another host port without changing the server port, edit the left side of the mapping:
 
----
+```yaml
+ports:
+  - "17777:7777"
+```
 
-## Using The Management Script
+### Supplying server arguments in Compose
 
-The `manage-tModLoaderServer.sh` script can be used to install tModLoader either directly from the GitHub release or from SteamCMD. The script is made to run fully standalone, so just download it to your server and run it. This is not the recommended way to install the dedicated server, and typically is only used to access the server's files
+Arguments in `command` are appended to the tModLoader server launch command. This permits an unattended initial world setup without adding another deployment file. For example:
 
-To explore all the options before continuing, run `./manage-tModLoaderServer.sh -h` to get a list of all environment variables and command line parameters
+```yaml
+services:
+  tml:
+    image: ghcr.io/perennialtech/tmd:latest
+    platform: linux/amd64
+    container_name: tml
+    restart: unless-stopped
+    environment:
+      TML_UID: "1000"
+      TML_GID: "1000"
+      UMASK: "0002"
+    command:
+      - -autocreate
+      - "2"
+      - -world
+      - /tModLoader/Worlds/world.wld
+    ports:
+      - "7777:7777"
+    tty: true
+    stdin_open: true
+    volumes:
+      - ./tModLoader:/tModLoader
+```
 
-### Installation
+Use the list form so Compose preserves argument boundaries.
 
-1. Ensure you have a proper [folder structure](#preinstall-folder-structure)
-2. Install either the SteamCMD or Github release
-   - **SteamCMD (recommended)**
-     1. Ensure SteamCMD is installed and on your PATH. You can install SteamCMD from your package manager or [Valve's Wiki](https://developer.valvesoftware.com/wiki/SteamCMD). If your distribution cannot install SteamCMD the standard way, download it manually and pass the `STEAMCMDPATH` environment variable to the management script
-     2. Run `./manage-tModLoaderServer.sh install-tml --username your_steam_username` and enter any password/2fa if necessary. tModLoader will install to the `server` directory in your installation folder
+## Mods
 
-   - **Github**
-     1. Run `./manage-tModLoaderServer.sh install-tml --github`. This will install the latest GitHub release, which is the same version as released on Steam
-        - To use a specific/legacy tModLoader version from Github, provide either a `tmlversion.txt` file from a modpack or pass the `TMLVERSION` environment variable with a specific version, e.g. `v2022.06.96.4`
-3. Install any necessary mods with `./manage-tModLoaderServer.sh install-mods`
-   - No mods will be installed if `install.txt` is missing, and no mods will be enabled if `enabled.json` is missing. **You will need a `Mods/enabled.json` to contain all Mods that you want enabled, including local mods**
-4. Start the server with `./manage-tModLoaderServer.sh start`. Be sure to pass in `--folder` again if you used a custom location during installation
+### Local mods
 
-**NOTE**: `install-mods` and `install-tml` can be run together with the `install` command, e.g. `./manage-tModLoaderServer.sh install ...`
+Place local `.tmod` files in `tModLoader/Mods`. Every enabled mod, including a local mod, must be listed in `tModLoader/Mods/enabled.json`.
 
-### Updating
+### Steam Workshop mods
 
-`./manage-tModLoaderServer.sh install` will update both TML and installed mods. To update just mods, run the `install-mods` command. To only update TML, run the `install-tml` command
+Steam Workshop uses numeric Workshop IDs rather than mod names. A tModLoader mod pack provides the required files:
 
----
+1. In tModLoader, open **Workshop → Mod Packs**.
+2. Select **Save Enabled as New Mod Pack**.
+3. Select **Open Mod Pack Folder**.
+4. Open the directory for the new mod pack.
+5. Copy `install.txt` and `enabled.json` into `tModLoader/Mods` on the server.
+6. Restart the container:
+
+   ```sh
+   docker compose restart
+   ```
+
+The container installs entries from `install.txt` at startup. No Workshop mods are downloaded when that file is absent.
 
 ## Server Configuration
 
-To run tModLoader without needing any input on startup (such as from an init system), copy the example [serverconfig.txt](https://github.com/tModLoader/tModLoader/tree/1.4.4/patches/tModLoader/Terraria/release_extras/serverconfig.txt) and change the settings how you like. Key options are defined below, and other options can be found [on the Terraria wiki](https://terraria.wiki.gg/wiki/Server#Server_config_file)
+For non-interactive startup, either supply server arguments in `compose.yaml` or create `tModLoader/serverconfig.txt`.
 
-- `worldname` changes the default world name when creating a new world using autocreate **You do not need to include .wld in your world name**. This setting **will not** work with an existing world, see the `world` option for an existing world
-- `world` sets the exact path to an existing or new terraria world, ex. `/path/to/your_world.wld`. **For Docker installations**, the world path must follow `/tModLoader/Worlds/your_world.wld`
-- `autocreate=1` will enable autocreating, which creates a new world at your provided location if one does not already exist
+An example configuration is available from the tModLoader project:
 
----
+<https://github.com/tModLoader/tModLoader/blob/1.4.5/patches/tModLoader/Terraria/release_extras/serverconfig.txt>
 
-## Updating the Management Script
+Important settings include:
 
-If an update for `manage-tModLoaderServer.sh` is available, a message will be printed letting you know one is available. It can be updated using `./manage-tModLoaderServer.sh update-script`. An outdated script may contain bugs or lack features, so it is usually a good idea to update when possible
+- `worldname` sets the name used when creating a world. Do not include `.wld`.
+- `world` sets the exact world path. In the container it must use a container path such as `/tModLoader/Worlds/world.wld`.
+- `autocreate=1`, `autocreate=2`, or `autocreate=3` creates a small, medium, or large world when the configured world does not exist.
+- `port=7777` selects the server's internal listening port. Update the Compose port mapping if this is changed.
+- `maxplayers` sets the player limit.
+- `password` sets the server password.
+
+Additional settings are documented on the Terraria wiki:
+
+<https://terraria.wiki.gg/wiki/Server#Server_config_file>
+
+After changing `serverconfig.txt`, restart the container:
+
+```sh
+docker compose restart
+```
+
+## Server Console
+
+View server output with:
+
+```sh
+docker compose logs -f
+```
+
+For an interactive console, use:
+
+```sh
+docker attach tml
+```
+
+Press `Ctrl-P`, followed by `Ctrl-Q`, to detach without stopping the server. Pressing `Ctrl-C` sends an interrupt to the server and can stop it.
+
+## Updating Docker
+
+Pull the current GHCR image and recreate the container:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+Persistent data remains in `./tModLoader`.
+
+To inspect the running image:
+
+```sh
+docker inspect --format '{{.Config.Image}}' tml
+```
+
+The package is published at:
+
+<https://github.com/perennialtech/tmd/pkgs/container/tmd>
+
+## Backup
+
+Stop the server before taking a filesystem-level backup so world files are consistent:
+
+```sh
+docker compose stop
+tar czf tModLoader-backup.tar.gz tModLoader
+docker compose start
+```
+
+Restore by stopping the server, replacing `./tModLoader` with the backup contents, and starting the server again. Ensure the restored files can be reassigned to the configured `TML_UID` and `TML_GID`.
+
+## Standalone Management Script
+
+The standalone script supports Linux installations that do not use Docker.
+
+Download it with:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/perennialtech/tmd/master/manage-tModLoaderServer.sh
+chmod +x manage-tModLoaderServer.sh
+```
+
+Show all commands and options with:
+
+```sh
+./manage-tModLoaderServer.sh --help
+```
+
+### Standalone directory structure
+
+```text
+tModLoader/
+├── Mods/
+│   ├── enabled.json
+│   └── install.txt
+├── Worlds/
+├── server/
+├── steamapps/
+├── manage-tModLoaderServer.sh
+├── serverconfig.txt
+└── tmlversion.txt
+```
+
+### Install from GitHub releases
+
+From the data directory:
+
+```sh
+./manage-tModLoaderServer.sh install-tml --github
+./manage-tModLoaderServer.sh install-mods
+./manage-tModLoaderServer.sh start
+```
+
+Select a specific tModLoader release with `TMLVERSION`:
+
+```sh
+TMLVERSION=v2024.08.3.3 ./manage-tModLoaderServer.sh install-tml --github
+```
+
+### Install through SteamCMD
+
+Ensure `steamcmd` is installed and available on `PATH`, then run:
+
+```sh
+./manage-tModLoaderServer.sh install-tml --username your_steam_username
+./manage-tModLoaderServer.sh install-mods
+./manage-tModLoaderServer.sh start
+```
+
+Use `STEAMCMDPATH` when SteamCMD is installed at a nonstandard path:
+
+```sh
+STEAMCMDPATH=/path/to/steamcmd.sh ./manage-tModLoaderServer.sh install-mods
+```
+
+### Update a standalone installation
+
+Update tModLoader and installed Workshop mods with:
+
+```sh
+./manage-tModLoaderServer.sh install
+```
+
+Update only one component with either:
+
+```sh
+./manage-tModLoaderServer.sh install-tml
+./manage-tModLoaderServer.sh install-mods
+```
+
+Use `--github` with `install-tml` or `install` when the installation is sourced from GitHub releases.
